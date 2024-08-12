@@ -60,7 +60,7 @@ while True:
     #plt.plot(range(len(pb)), pb, label="min")
     #plt.show()
     print("Found {} in A and {} in B in {}s".format(pa,pb, end-start))
-    if (time() - begin)/50 > 0.5:
+    if (time() - begin)/60 > 1.5:
         break
 
 if os.path.exists(filename):

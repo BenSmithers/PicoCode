@@ -10,12 +10,13 @@ filename = os.path.join(
 
 data = np.loadtxt(filename, delimiter=",").T 
 
-times = data[0] - np.min(data[0])
+times = (data[0] - np.min(data[0]))/60
 
 plt.errorbar(times, y=100*(data[1]-data[1][0])/data[1][0], yerr=data[2]/data[1][0], capsize=5, ecolor="k", label="Channel A", marker="d")
 plt.errorbar(times, y=100*(data[3]-data[3][0])/data[3][0], yerr=data[4]/data[3][0], capsize=5, ecolor="k", label="Channel B", marker="d")
 plt.ylabel("% Change", size=14)
-plt.xlabel("Time")
+plt.xlabel("Time [min]")
+plt.legend()
 plt.show()
 
 
