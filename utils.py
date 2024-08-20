@@ -134,14 +134,17 @@ class Scope(ContextDecorator):
 
 
         for ic, chankey in enumerate(self._channels.keys()):  
+            sign = 1 if chankey==0 else -1
             for i in range(10):
                 parsed = adc2mV(self._channels[chankey].bufmax[i], chARange, maxADC)
-                #plt.plot(range(len(parsed)), -1*np.array(parsed), alpha=0.2)
+                #plt.plot(range(len(parsed)), sign*np.array(parsed), alpha=0.2)
                 
-                peakfind = find_peaks(-1*np.array(parsed), height=50)
+                peakfind = find_peaks(sign*np.array(parsed), height=40)
                 peaks[ic] += len(peakfind[0])
                 amps[ic] += list(peakfind[1]["peak_heights"])
+                
         #return self._channels[chankey].bufmax[i], self._channels[chankey].bufmin[i]
+        #plt.show()
         return peaks 
 
     def adc2mV(self, bufferADC, maxADC):

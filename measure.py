@@ -1,19 +1,26 @@
-from utils import Scope
+from time import time 
+begin = time()
+
+from utils import Scope, MAXSAMPLES
 from picosdk.ps3000a import ps3000a as ps
 
-from time import time 
 import matplotlib.pyplot as plt 
 import numpy as np
 import os 
 
 #with Scope() as scope_obj:
 
+import sys 
+if MAXSAMPLES!= 25000:
+    print("Max samples changed - change the number of expected pulses")
+
+
 scope_obj = Scope()
 scope_obj.__enter__()
 print(scope_obj)
 
 scope_obj.enable_channel(0, collect = True)
-scope_obj.set_trigger(0)
+#scope_obj.set_trigger(0)
 
 scope_obj.enable_channel(1)
 scope_obj.enable_channel(3)
@@ -28,7 +35,6 @@ pbnet = []
 pcnet = []
 
 
-begin = time()
 
 filename = os.path.join(
     os.path.dirname(__file__),
@@ -36,6 +42,8 @@ filename = os.path.join(
 )
 
 while True:
+    pa = 2661
+
     start = time()
     pa, pb, pc =  scope_obj.sample()
     end = time()
@@ -61,8 +69,8 @@ while True:
     #plt.plot(range(len(pa)), pa, label="max")
     #plt.plot(range(len(pb)), pb, label="min")
     #plt.show()
-    print("Found {} in A and {} in B in {}s".format(pa,pb, end-start))
-    if (time() - begin)/60 > 1.:
+    print("Found  {}-B and {}-D {} seconds".format(pb/pa, pc/pa,  end-start))
+    if (time() - begin)/90 > 1.:
         break
 
 panet = np.array(panet)
