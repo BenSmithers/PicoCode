@@ -22,8 +22,8 @@ print(scope_obj)
 scope_obj.enable_channel(0, collect = True)
 #scope_obj.set_trigger(0)
 
-scope_obj.enable_channel(1)
-scope_obj.enable_channel(3)
+scope_obj.enable_channel(1, pulse_threshold=38)
+scope_obj.enable_channel(3, pulse_threshold=14)
 
 bins = np.linspace(0,400, 100)
 
@@ -38,7 +38,7 @@ pcnet = []
 
 filename = os.path.join(
     os.path.dirname(__file__),
-    "ratio_data.csv"
+    "ratio_data_new.csv"
 )
 
 while True:
