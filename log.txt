@@ -1,0 +1,3 @@
+1724783570.6892562 - starting to empty tube, running into problems
+1724783983.883401 - filling tube with osmsis water again
+1724784215.452145 - tube is filled now
