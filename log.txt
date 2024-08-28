@@ -1,3 +1,7 @@
 1724783570.6892562 - starting to empty tube, running into problems
 1724783983.883401 - filling tube with osmsis water again
 1724784215.452145 - tube is filled now
+1724801813.385089 - no amplifier now
+1724863287.0677238 - emptying tube
+1724863548.1169956 - tube empty
+1724863987.3438454 - tube full
