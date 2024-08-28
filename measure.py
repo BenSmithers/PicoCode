@@ -22,8 +22,8 @@ print(scope_obj)
 scope_obj.enable_channel(0, collect = True)
 #scope_obj.set_trigger(0)
 
-scope_obj.enable_channel(1, pulse_threshold=38)
-scope_obj.enable_channel(3, pulse_threshold=14)
+scope_obj.enable_channel(1, pulse_threshold=25)
+scope_obj.enable_channel(3, pulse_threshold=25)
 
 bins = np.linspace(0,400, 100)
 
@@ -38,7 +38,7 @@ pcnet = []
 
 filename = os.path.join(
     os.path.dirname(__file__),
-    "ratio_data_new.csv"
+    "ratio_data_osmosis.csv"
 )
 
 while True:
@@ -69,6 +69,7 @@ while True:
     #plt.plot(range(len(pa)), pa, label="max")
     #plt.plot(range(len(pb)), pb, label="min")
     #plt.show()
+    #print("Found  {}-B and {}-D {} seconds".format(pb, pc,  end-start))
     print("Found  {}-B and {}-D {} seconds".format(pb/pa, pc/pa,  end-start))
     if (time() - begin)/90 > 1.:
         break
