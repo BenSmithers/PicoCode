@@ -2,18 +2,17 @@ from time import time
 begin = time()
 
 from utils import Scope, MAXSAMPLES, ReturnType
-from picosdk.ps3000a import ps3000a as ps
-
 import matplotlib.pyplot as plt 
 import numpy as np
 import os 
+
+import json 
 
 #with Scope() as scope_obj:
 
 import sys 
 if MAXSAMPLES!= 25000:
     print("Max samples changed - change the number of expected pulses")
-
 
 scope_obj = Scope()
 scope_obj.__enter__()
@@ -35,12 +34,6 @@ pbnet = []
 pcnet = []
 
 
-
-filename = os.path.join(
-    os.path.dirname(__file__),
-    "ratio_data.csv"
-)
-
 while True:
     pa = 2661
 
@@ -59,6 +52,34 @@ while True:
     #plt.show()
     if (time() - begin)/60 > 1.:
         break
+
+
+
+filename = os.path.join(
+    os.path.dirname(__file__),
+    "charge_distrib_log.json"
+)
+
+new_entry = {
+    "time":time(),
+    "bins":bins.tolist(),
+    "monitor":data.tolist(),
+    "receiver":data2.tolist()
+}
+
+if os.path.exists(filename):
+    _obj = open(filename,'rt')
+    savedata = json.load(_obj)
+    _obj.close()
+else:
+    savedata = []
+savedata.append(new_entry)
+
+_obj = open(filename, 'wt')
+json.dump(savedata, _obj, indent=4)
+_obj.close()
+
+
 plt.stairs(data, bins, label="Channel B")
 plt.stairs(data2, bins, label="Channel D")
 plt.legend()
