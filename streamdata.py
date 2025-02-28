@@ -1,20 +1,46 @@
-#
-# Copyright (C) 2018-2020 Pico Technology Ltd. See LICENSE file for terms.
-#
-# PS3000 Series (A API) STREAMING MODE EXAMPLE
-# This example demonstrates how to call the ps3000a driver API functions in order to open a device, setup 2 channels and collects streamed data (1 buffer).
-# This data is then plotted as mV against time in ns.
-
-from __future__ import division
+import os 
 import ctypes
 import numpy as np
 from picosdk.ps3000a import ps3000a as ps
 import matplotlib.pyplot as plt
 from picosdk.functions import adc2mV, assert_pico_ok
 import time
+from scipy.signal import find_peaks
+from utils import get_valid
+skip_write = False
 
+DEBUG = False
+HEIGHT = False
+
+collection_time = 90
+if not skip_write:
+    _obj = open(os.path.join(os.path.dirname(__file__), "outfilename.txt"), 'rt')
+    basename = _obj.readline()
+    _obj.close()
+
+
+    filename = os.path.join(
+        os.path.dirname(__file__),
+        "data",
+        basename
+    )
+
+thresh = 5.0
+bped = -0.55
+dped = -1.0
 channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
+t_total = 0
+mon_total = 0
+rec_total = 0
+
+b_heights = []
+d_heights = []
+
 def adc2mV(buffer, rang, maxADC):
+    """
+    Rewrote the picoscode version of this to use vectorized numpy math
+    Got some 100x speed improvements 
+    """
     return (buffer.astype(float)*channelInputRanges[rang])/maxADC.value 
 
 
@@ -53,6 +79,8 @@ analogue_offset = 0.0
 # range = PS3000A_2V = 7
 # analogue offset = 0 V
 channel_range = ps.PS3000A_RANGE['PS3000A_2V']
+ch_range_2 = ps.PS3000A_RANGE['PS3000A_20MV'] +2
+print(ch_range_2, "challen range")
 status["setChA"] = ps.ps3000aSetChannel(chandle,
                                         ps.PS3000A_CHANNEL['PS3000A_CHANNEL_A'],
                                         enabled,
@@ -72,7 +100,7 @@ status["setChB"] = ps.ps3000aSetChannel(chandle,
                                         ps.PS3000A_CHANNEL['PS3000A_CHANNEL_B'],
                                         enabled,
                                         ps.PS3000A_COUPLING['PS3000A_DC'],
-                                        channel_range,
+                                        ch_range_2,
                                         analogue_offset)
 assert_pico_ok(status["setChB"])
 
@@ -80,14 +108,18 @@ status["setChD"] = ps.ps3000aSetChannel(chandle,
                                         ps.PS3000A_CHANNEL['PS3000A_CHANNEL_D'],
                                         enabled,
                                         ps.PS3000A_COUPLING['PS3000A_DC'],
-                                        channel_range,
+                                        ch_range_2,
                                         analogue_offset)
 assert_pico_ok(status["setChB"])
 
 
 # Size of capture
-sizeOfOneBuffer = 1000
-numBuffersToCapture = 5000
+# we want a lot of these. The more the better. Eventually reached diminishing returns 
+sizeOfOneBuffer = 500 # 0000
+if not DEBUG:
+    sizeOfOneBuffer *= 10000
+
+numBuffersToCapture = 10
 
 totalSamples = sizeOfOneBuffer * numBuffersToCapture
 
@@ -148,12 +180,16 @@ maxPreTriggerSamples = 0
 autoStopOn = 1
 # No downsampling:
 downsampleRatio = 1
-
+bufferCompleteA = np.zeros(shape=totalSamples, dtype=np.int16)
+bufferCompleteB = np.zeros(shape=totalSamples, dtype=np.int16)
+bufferCompleteD = np.zeros(shape=totalSamples, dtype=np.int16)
 import time 
 loops = 0
+collection_start = time.time()
+nns = 0
 while True:
 
-
+    # need to set a lot of this up between calls 
     start = time.time()
     status["runStreaming"] = ps.ps3000aRunStreaming(chandle,
                                                     ctypes.byref(sampleInterval),
@@ -169,15 +205,11 @@ while True:
     actualSampleInterval = sampleInterval.value
     actualSampleIntervalNs = actualSampleInterval *1
 
-    print("Capturing at sample interval %s ns" % actualSampleIntervalNs)
 
-    # We need a big buffer, not registered with the driver, to keep our complete capture in.
-    bufferCompleteA = np.zeros(shape=totalSamples, dtype=np.int16)
-    bufferCompleteB = np.zeros(shape=totalSamples, dtype=np.int16)
-    bufferCompleteD = np.zeros(shape=totalSamples, dtype=np.int16)
     nextSample = 0
     autoStopOuter = False
     wasCalledBack = False
+    # We need a big buffer, not registered with the driver, to keep our complete capture in.
     def streaming_callback(handle, noOfSamples, startIndex, overflow, triggerAt, triggered, autoStop, param):
         global nextSample, autoStopOuter, wasCalledBack
         wasCalledBack = True
@@ -203,9 +235,6 @@ while True:
             # again.
             time.sleep(0.01)
 
-    print("Done grabbing values.")
-
-
 
     # Find maximum ADC count value
     # handle = chandle
@@ -217,36 +246,107 @@ while True:
     # Convert ADC counts data to mV
     conv_t = time.time()
     adc2mVChAMax = adc2mV(bufferCompleteA, channel_range, maxADC)
-    adc2mVChBMax = adc2mV(bufferCompleteB, channel_range, maxADC)
-    adc2mVChDMax = adc2mV(bufferCompleteD, channel_range, maxADC)
-    adc2mVChAMax = np.array(adc2mVChAMax)
+    adc2mVChBMax = adc2mV(bufferCompleteB, ch_range_2, maxADC) -bped
+    adc2mVChDMax = adc2mV(bufferCompleteD, ch_range_2, maxADC)-dped
+
+#    adc2mVChAMax = bufferCompleteA
+#    adc2mVChBMax = bufferCompleteB
+#    adc2mVChDMax = bufferCompleteD
     conv_t_end = time.time()
-    print("Conversion took {} seconds".format(conv_t_end - conv_t))
+    #print("Conversion took {} seconds".format(conv_t_end - conv_t))
     # Create time data
     time_sample = np.linspace(0, (totalSamples - 1) * actualSampleIntervalNs, totalSamples)
-
-    crossings = np.diff(np.sign(adc2mVChAMax - 500))
+    
+    # we drop this down to just a difference in the sign (-2, 0, +2)
+    # but shifted down by the threshold 
+    # so +2 is crossing up, -2 is crossing down, 0 is staying above/below 
+    crossings = np.diff(np.sign(adc2mVChAMax - 2000))
+    #  call the crossing-down ones nothing
     crossings[crossings<0] = 0
+    # and get the places where we are crossing up. hit times! 
     crossings = np.where(crossings)
-
     ctime = time_sample[crossings[0]]
 
-    end = time.time()
-    print("Took {} seconds".format(end -start))
-    print("Counted {} pulses; {} per second".format(len(ctime), len(ctime)/(end-start)))
+    ntrig = len(ctime)
 
+    # repeat for all channels  
+    crossings = np.diff(np.sign(-adc2mVChBMax - thresh))
+    crossings[crossings>0]=0
+    crossings = np.where(crossings)
+
+    rectime = time_sample[crossings[0]]
+    is_good = get_valid(ctime, rectime, False).astype(int)
+    
+    nmon = np.sum(is_good)
+    if HEIGHT:
+        heights = peaks[1]["peak_heights"].tolist()
+        b_heights+=heights
+    
+    crossings = np.diff(np.sign(-adc2mVChDMax - thresh))
+    crossings[crossings>0]=0
+    crossings = np.where(crossings)
+
+    montime = time_sample[crossings[0]]
+    is_good = get_valid(ctime, montime, True).astype(int)
+    
+    if HEIGHT:
+        heights = peaks[1]["peak_heights"].tolist()
+        d_heights += heights 
+
+    nrec = np.sum(is_good)
+    if DEBUG:
+        print(nmon, nrec)
+
+    t_total += ntrig
+    mon_total +=nmon
+    rec_total +=nrec
+
+    end = time.time()
+#    print("Peak finding takes {}".format(end - conv_t_end))
+    #   print("Took {} seconds".format(end -start))
+
+    # the number of those crossing times is the number of pulses! 
+    #print("Counted {} pulses; {} per second".format(len(ctime), len(ctime)/(end-start)))
+    if ntrig>0:
+        print("Rates {:.4f}, {:.4f}".format(nmon/ntrig, nrec/ntrig))
+    else:
+        print(" {:.4f}, {:.4f}".format(nmon, nrec))
+        
+    nns += len(adc2mVChAMax)*8
+        
+    #print("Rate: ", (1e-3)*nmon/(nns*1e-9), (1e-3)*nrec/(nns*1e-9))
     loops +=1
-    if loops>3:
+    if (time.time() - collection_start)>collection_time:
         break
 
-if False:
-    # Plot data from channel A and B
-    plt.plot(time_sample, adc2mVChAMax[:])
-    plt.vlines(ctime, adc2mVChAMax.min(), adc2mVChAMax.max(), color='red')
-    #plt.plot(time, adc2mVChBMax[:])
-    plt.xlabel('Time (ns)')
-    plt.ylabel('Voltage (mV)')
+    if DEBUG:
+        # Plot data from channel A and B
+        plt.plot(time_sample, adc2mVChAMax/1000, label="Trig/1000") #/adc2mVChAMax.max())
+        plt.plot(time_sample, adc2mVChBMax, label="Mon") #/adc2mVChBMax.max())
+        plt.plot(time_sample, adc2mVChDMax, label="Rec")
+        plt.vlines(ctime, 0 ,1, color='red')
+        #plt.plot(time, adc2mVChBMax[:])
+        plt.xlabel('Time (ns)')
+        plt.ylabel('Voltage (mV)')
+        plt.show()
+        break 
+
+# write!
+if True:
+    print("Total Rate, {:.2f}, {:.2f}".format((1e-3)*nmon/(nns*1e-9), (1e-3)*nrec/(nns*1e-9)))
+if HEIGHT:
+    bins = np.linspace(0, 100, 128)
+    plt.stairs(np.histogram(b_heights, bins)[0], bins, label="Mon")
+    plt.stairs(np.histogram(d_heights, bins)[0], bins, label="Rec")
+    plt.legend()
+    plt.yscale('log')
+    plt.xlabel("mV",size=14)
     plt.show()
+
+if not skip_write:
+    _obj = open(filename, 'at')
+    _obj.write("{}, {}, {}, {}\n".format(time.time(), t_total, mon_total, rec_total))
+    _obj.close()
 
 # Stop the scope
 # handle = chandle
@@ -258,5 +358,3 @@ assert_pico_ok(status["stop"])
 status["close"] = ps.ps3000aCloseUnit(chandle)
 assert_pico_ok(status["close"])
 
-# Display status returns
-print(status)
