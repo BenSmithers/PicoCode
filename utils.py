@@ -10,15 +10,44 @@ import matplotlib.pyplot as plt
 import numpy as np 
 import time as pytime
 from scipy.signal import find_peaks
-
+from tqdm import tqdm
 MAXSAMPLES = 25000
 overflow = (ctypes.c_int16 * 60)()
 cmaxSamples = ctypes.c_int32(MAXSAMPLES)
 maxADC = ctypes.c_int16()
 
 chARange = 5
-
+nbuf = 10
 channelInputRanges = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000]
+
+def get_valid(trigs, hits, is_rec):
+    if is_rec:
+        min_time = 113
+        max_time = 140
+    else:
+        min_time = 14
+        max_time = 40
+
+    is_valid = np.zeros_like(hits)
+    is_valid = is_valid.astype(bool)
+
+    hit_index = 0
+    for i in range(len(trigs)):
+        while hits[hit_index]<(trigs[i]+max_time) and hit_index<len(hits)-1:
+
+            # now the hit_index is the hit just after the trig we're on
+            dif = hits[hit_index] - trigs[i]
+            if dif>min_time and dif<max_time:
+                is_valid[hit_index] = True
+                hit_index +=1
+                break
+            else:
+                is_valid[hit_index] = False #or is_valid[hit_index]
+
+            hit_index+=1
+    
+    return is_valid
+
 
 class ReturnType(Enum):
     PulseCount = 0
@@ -40,8 +69,8 @@ class Scope(ContextDecorator):
         self.status = ps.ps3000aOpenUnit(ctypes.byref(self.chandle ), None)
         self.powerstat =  ps.ps3000aChangePowerSource(self.chandle , 282)
 
-        self._min_offset = 170 # ns? 
-        self._max_offset = 250 
+        self._min_offset = 25 # ns? 
+        self._max_offset = 150
         self._time_per_sample = -1
 
     def __exit__(self, *exc):
@@ -79,7 +108,7 @@ class Scope(ContextDecorator):
         assert_pico_ok(status)
         self._prepared = True 
 
-    def enable_channel(self, channo, collect=True, pulse_threshold=40):
+    def enable_channel(self, channo, collect=True, pulse_threshold=25):
         """
             Enable the channel on the picoscope, and then prepare a Channel object where the buffers will be opened
         """
@@ -144,7 +173,7 @@ class Scope(ContextDecorator):
         assert_pico_ok(status)  
         status = ps.ps3000aMaximumValue(self.chandle, ctypes.byref(maxADC))
         assert_pico_ok(status)
-
+        pytime.sleep(0.25)
 
 
         for ic, chankey in enumerate(self._channels.keys()):  
@@ -155,34 +184,71 @@ class Scope(ContextDecorator):
                 
                 # find_peks returns only the index of the peaks, so we need to extrapolate out to get a time
                 # and then also consider that each of these samples are sequential
-                peakfind = find_peaks(sign*np.array(parsed), height=self._threshs[chankey])
-                shifted_times = np.array(peakfind[0])*self._time_per_sample + i*self._time_per_sample*len(parsed)
-                peaks[ic] += len(peakfind[0])
+
+
+                # on signal is 170ns, off is 200ns 
+                if ic==0:
+                    # we get the time when the trigger signal crosses the axis
+                    crossings = np.argwhere(np.diff(np.sign(sign*np.array(parsed) - self._threshs[chankey]))).flatten()
+                    if len(crossings)<1 or len(crossings)<2:
+                        continue
+                    start_on = crossings[1] - crossings[0] < 180
+                    if start_on:
+                        crossings = crossings[np.array(range(len(crossings)))%2==0]
+                    else:
+                        crossings = crossings[np.array(range(len(crossings)))%2==1]
+
+                    shifted_times = np.array(crossings)*self._time_per_sample + i*self._time_per_sample*len(parsed)
+                    peaks[ic] += len(shifted_times)
+                    amps[ic] += list(np.array(parsed)[crossings]) 
+
+                else:
+                    peakfind = find_peaks(sign*np.array(parsed), height=self._threshs[chankey])
+                    shifted_times = np.array(peakfind[0])*self._time_per_sample + i*self._time_per_sample*len(parsed)
+                    peaks[ic] += len(peakfind[0])
+                    amps[ic] += list(peakfind[1]["peak_heights"])
                 times[ic] += shifted_times.tolist() 
-                amps[ic] += list(peakfind[1]["peak_heights"])
 
-                
+       # print(times[2][:10])
         accepted = [[], []]
-        # iterate over the pulse times for channels
-        for pulse_time in times[1]:
-            # binary search to find the trigger pulses bordering this one
-            index = np.searchsorted(times[0], pulse_time)-1  # minus one to get the proper index of the proceeding pulse 
-            tdiff = pulse_time - times[0][index]
-            accepted[0].append( tdiff>self._min_offset and tdiff<self._max_offset )
-        
-        for pulse_time in times[2]:
-            index = np.searchsorted(times[0], pulse_time)-1  # minus one to get the proper index of the proceeding pulse 
-            tdiff = pulse_time - times[0][index]
-            accepted[1].append( tdiff>self._min_offset and tdiff<self._max_offset )
 
+        if len(times[0]) >0:
+            # iterate over the pulse times for channels
+            for i, pulse_time in enumerate(times[1]):
+                # binary search to find the trigger pulses bordering this one
+                index = np.searchsorted(times[0], pulse_time)-1  # minus one to get the proper index of the proceeding pulse 
+                if index>=len(times[0]):
+                    index = len(times[0])-1
+                
+                tdiff = pulse_time - times[0][index]
+          
+                #accepted[0].append( tdiff>self._min_offset and tdiff<self._max_offset )
+                accepted[0].append(True)
+            
+            for i, pulse_time in enumerate(times[2]):
+                index = np.searchsorted(times[0], pulse_time)-1  # minus one to get the proper index of the proceeding pulse 
+                if index>=len(times[0]):
+                    index=len(times[0])-1
+                tdiff = pulse_time - times[0][index]
+                accepted[1].append(True)
+                #accepted[1].append( tdiff>self._min_offset and tdiff<self._max_offset )
         accepted =[np.array(accepted[0]), np.array(accepted[1])]
         amps = [np.array(entry) for entry in amps ]
 
-        #return self._channels[chankey].bufmax[i], self._channels[chankey].bufmin[i]
-        #plt.show()
+            #return self._channels[chankey].bufmax[i], self._channels[chankey].bufmin[i]
+            #plt.show()
         if return_kind.value==ReturnType.PulseCount.value:
             #return peaks[0], times[0], times[1]
-            return peaks[0], len(amps[1][accepted[0]]),len(amps[2][accepted[1]])  
+            if np.sum(accepted[0].astype(int))==0:
+                acc0 = 0
+            else:
+                acc0 = len(amps[1][accepted[0]])
+            if np.sum(accepted[1].astype(int))==0:
+                acc1=0
+            else:
+                acc1 = len(amps[2][accepted[1]])
+            return peaks[0], acc0, acc1
+
         elif return_kind.value==ReturnType.Amplitudes.value:
             return peaks[0], amps[1][accepted[0]], amps[2][accepted[1]]
 
